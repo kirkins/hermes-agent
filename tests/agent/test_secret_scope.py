@@ -261,6 +261,8 @@ class TestEnvFileParsing:
         """
         monkeypatch.setenv("OLLAMA_API_KEY", "deployment-provider-key")
         monkeypatch.setenv("API_SERVER_KEY", "deployment-api-key")
+        from tui_gateway import launch_profile_policy
+        monkeypatch.setattr(launch_profile_policy, "_snapshot", None)
         secondary = tmp_path / "profiles" / "secondary"
         secondary.mkdir(parents=True)
         from gateway.config import GatewayConfig
@@ -281,6 +283,8 @@ class TestEnvFileParsing:
     def test_profile_value_wins_over_declared_deployment_secret(self, tmp_path, monkeypatch):
         """Opt-in inheritance must not merge credentials between profiles."""
         monkeypatch.setenv("OPENAI_API_KEY", "deployment-key")
+        from tui_gateway import launch_profile_policy
+        monkeypatch.setattr(launch_profile_policy, "_snapshot", None)
         (tmp_path / ".env").write_text("OPENAI_API_KEY=profile-key\n", encoding="utf-8")
         ss.set_deployment_secret_names(("OPENAI_API_KEY",))
 

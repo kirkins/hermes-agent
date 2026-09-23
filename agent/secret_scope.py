@@ -32,25 +32,34 @@ _MULTIPLEX_ACTIVE: bool = False
 # is intentionally separate from ``_GLOBAL_ENV_EXACT``: inherited values remain
 # entries in each profile's mapping, so an undeclared credential still fails
 # closed rather than becoming readable from ``os.environ`` everywhere.
-_DEPLOYMENT_SECRET_NAMES: frozenset[str] = frozenset()
+_DEPLOYMENT_SECRET_VALUES: Dict[str, str] = {}
 
 
 def set_deployment_secret_names(names: object) -> None:
-    """Set explicitly opted-in process credentials for profile scopes.
+    """Freeze explicitly opted-in launch credentials for profile scopes.
 
     Called by the gateway after parsing ``gateway.deployment_secret_env``.
     Invalid config is already filtered by ``GatewayConfig``; this defensive
     normalization keeps direct callers from accidentally widening the scope.
     """
-    global _DEPLOYMENT_SECRET_NAMES
+    global _DEPLOYMENT_SECRET_VALUES
     if not isinstance(names, (list, tuple, set, frozenset)):
-        _DEPLOYMENT_SECRET_NAMES = frozenset()
+        _DEPLOYMENT_SECRET_VALUES = {}
         return
-    _DEPLOYMENT_SECRET_NAMES = frozenset(
+    selected = frozenset(
         name for name in names
         if isinstance(name, str) and re.fullmatch(r"[A-Z_][A-Z0-9_]*", name)
         and not _is_global_env(name)
     )
+    if not selected:
+        _DEPLOYMENT_SECRET_VALUES = {}
+        return
+    # The first launch snapshot wins even if a routed profile later mutates os.environ.
+    from tui_gateway.launch_profile_policy import capture_launch_env
+    launch_env = capture_launch_env()
+    _DEPLOYMENT_SECRET_VALUES = {
+        name: launch_env[name] for name in selected if name in launch_env
+    }
 
 
 def set_multiplex_active(active: bool) -> None:
@@ -354,10 +363,8 @@ def build_profile_secret_scope(hermes_home: Path) -> Dict[str, str]:
     except Exception:
         external_secrets = {}
     secrets.update((k, v) for k, v in external_secrets.items() if not _is_global_env(k))
-    for name in _DEPLOYMENT_SECRET_NAMES:
-        value = os.environ.get(name)
-        if value is not None:
-            secrets.setdefault(name, value)
+    for name, value in _DEPLOYMENT_SECRET_VALUES.items():
+        secrets.setdefault(name, value)
     # The DEFAULT profile's config.yaml allow_all_users grant lives only in os.environ (bridged by
     # gateway.config_loader); scoped gate readers under multiplex never fall to os.environ, so seed it
     # into that profile's own mapping. A secondary never inherits it (#80099 class).
